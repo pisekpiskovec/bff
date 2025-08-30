@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -47,7 +48,7 @@ public:
   bool insert_line(string buffer_name, int line_num, string content);
   bool delete_line(string buffer_name, int line_num);
   bool move_line(string buffer_name, int from_line_num, int to_line_num);
-  bool copy_line(string buffer_name, int line_num, string content);
+  bool copy_line(string buffer_name, int line_num, int to_line_num);
   string get_line(string buffer_name, int line_num);
   void print_line(string buffer_name, int line_num);
   void print_lines(string buffer_name, int start_line, int end_line);
@@ -103,6 +104,17 @@ public:
   void run(int argc, char **argv);
 };
 
+string padder(int total_length, size_t length_of_variable_to_pad_before,
+              char char_to_represent_paddign = '0') {
+  int number_of_chars_to_pad = total_length - length_of_variable_to_pad_before;
+  string result = "";
+
+  for (int i = 0; i < number_of_chars_to_pad; i++)
+    result += char_to_represent_paddign;
+
+  return result;
+}
+
 ///////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////
 
@@ -130,6 +142,19 @@ Buffer *BufferManager::create_buffer(string name) {
   return new_buffer;
 }
 
+Buffer *BufferManager::get_buffer(string name) {
+  auto it = buffers.find(name);
+  if (it != buffers.end())
+    return it->second;
+
+  load_buffer_from_temp(name);
+  it = buffers.find(name);
+  if (it != buffers.end())
+    return it->second;
+
+  return create_buffer(name);
+}
+
 bool BufferManager::select_buffer(string name) {
   auto it = buffers.find(name);
   if (it != buffers.end()) {
@@ -145,6 +170,39 @@ bool BufferManager::select_buffer(string name) {
   }
 
   return false;
+}
+
+void BufferManager::save_buffer_to_temp(Buffer *buf) {
+  if (!buf)
+    return;
+
+  string temp_file_path = temp_directory + buf->name + ".tmp";
+  ofstream temp_file(temp_file_path);
+
+  if (temp_file.is_open()) {
+    for (const auto &line : buf->lines)
+      temp_file << line << "\n";
+
+    temp_file.close();
+  }
+}
+
+void BufferManager::load_buffer_from_temp(string name) {
+  string temp_file_path = temp_directory + name + ".tmp";
+  if (!filesystem::exists(temp_file_path))
+    return;
+
+  Buffer *buf = create_buffer(name);
+  buf->lines.clear();
+
+  ifstream temp_file(temp_file_path);
+  if (temp_file.is_open()) {
+    string line;
+    while (getline(temp_file, line)) {
+      buf->lines.push_back(line);
+    }
+    temp_file.close();
+  }
 }
 
 bool BufferManager::open_file(string buffer_name, string file_path) {
@@ -165,6 +223,61 @@ bool BufferManager::open_file(string buffer_name, string file_path) {
   buf->is_modified = false;
   save_buffer_to_temp(buf);
   return true;
+}
+
+bool BufferManager::save_file(string buffer_name, string file_path) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf)
+    return false;
+
+  string save_path = file_path.empty() ? buf->file_path : file_path;
+  if (save_path.empty())
+    return false;
+
+  ofstream file(save_path);
+  if (!file.is_open())
+    return false;
+
+  for (const auto line : buf->lines)
+    file << line << "\n";
+
+  file.close();
+  buf->is_modified = false;
+  if (!file_path.empty())
+    buf->file_path = file_path;
+  save_buffer_to_temp(buf);
+  return true;
+}
+
+bool BufferManager::create_new_buffer(string buffer_name, string file_path) {
+  Buffer *buf = create_buffer(buffer_name);
+  buf->lines.clear();
+  buf->file_path = file_path;
+  buf->is_modified = false;
+  save_buffer_to_temp(buf);
+  return true;
+}
+
+void BufferManager::print_buffer(string buffer_name) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name << "' not found or empty." << endl;
+    return;
+  }
+
+  for (size_t i = 0; i < buf->lines.size(); i++)
+    cout << padder(4, buf->lines[i].length()) << i + 1 << ": " << buf->lines[i]
+         << endl;
+}
+
+void BufferManager::append_to_buffer(string buffer_name, string content) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf)
+    return;
+
+  buf->lines.push_back(content);
+  buf->is_modified = true;
+  save_buffer_to_temp(buf);
 }
 
 bool BufferManager::replace_line(string buffer_name, int line_num,
@@ -224,10 +337,62 @@ bool BufferManager::move_line(string buffer_name, int from_line, int to_line) {
   return true;
 }
 
+bool BufferManager::copy_line(string buffer_name, int from_line, int to_line) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf || from_line < 1 || to_line < 1 ||
+      from_line > static_cast<int>(buf->lines.size()) ||
+      to_line > static_cast<int>(buf->lines.size()))
+    return false;
+
+  string line_content = buf->lines[from_line - 1];
+  buf->lines.insert(buf->lines.begin() + to_line - 1, line_content);
+  buf->is_modified = true;
+  save_buffer_to_temp(buf);
+  return true;
+}
+
+string BufferManager::get_line(string buffer_name, int line_num) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf || line_num < 1 || line_num > static_cast<int>(buf->lines.size()))
+    return "";
+
+  return buf->lines[line_num - 1];
+}
+
+void BufferManager::print_line(string buffer_name, int line_num) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf || line_num < 1 || line_num > static_cast<int>(buf->lines.size())) {
+    cerr << "Line " << line_num << " not found in buffer '" << buffer_name
+         << "'" << endl;
+    return;
+  }
+
+  cout << padder(4, buf->lines[line_num - 1].length()) << line_num << ": "
+       << buf->lines[line_num - 1] << endl;
+}
+
+void BufferManager::print_lines(string buffer_name, int start_line,
+                                int end_line) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name << "' not found." << endl;
+    return;
+  }
+
+  if (start_line < 1)
+    start_line = 1;
+  if (end_line > static_cast<int>(buf->lines.size()))
+    end_line = static_cast<int>(buf->lines.size());
+
+  for (int i = start_line; i <= end_line; ++i)
+    cout << padder(4, buf->lines[i].length()) << i << ": " << buf->lines[i - 1]
+         << endl;
+}
+
 ///////////////////////////////////////////////////////
 
 ParsedCommand CommandParser::parse(int argc, char **argv) {
-  ParsedCommand cmd;
+  ParsedCommand cmd{};
 
   if (argc < 3)
     throw invalid_argument("Insufficient arguments");
@@ -297,15 +462,19 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
       else if (line_operation == "range" && argc > 6) {
         cmd.line_cmd = PRINT_RANGE;
         cmd.second_line_number = stoi(string(argv[6]));
-      }
-    }
-  }
+      } else
+        throw invalid_argument("Unknown line operation: " + line_operation);
+    } else
+      throw invalid_argument("Unknown command: " + command);
+  } else
+    throw invalid_argument(
+        "Invalid command format. Use -b flag to specify buffer.");
 
   return cmd;
 }
 
 void CommandParser::print_usage() {
-  cout << "bff: bff-technical-preview01" << endl << endl;
+  cout << "bff: bff-technical-preview02" << endl << endl;
 
   cout << "Usage: bff -b [BUFFER NAME] [BUFFER COMMAND|LINE COMMAND] [COMMAND "
           "ARGUMENT 1] [COMMAND ARGUMENT 2]"
@@ -332,7 +501,26 @@ void CommandParser::print_usage() {
   cout << "bff -b \"test\" line 1 range 10" << endl;
 }
 
+// TODO: Expand this?
+bool CommandParser::validate_command(const ParsedCommand &cmd) {
+  if (cmd.buffer_name.empty())
+    return false;
+  if (cmd.type == LINE_CMD && cmd.line_number <= 0)
+    return false;
+  return true;
+}
+
 ///////////////////////////////////////////////////////
+
+BFFEditor::BFFEditor() {
+  buffer_manager = new BufferManager();
+  parser = new CommandParser();
+}
+
+BFFEditor::~BFFEditor() {
+  delete buffer_manager;
+  delete parser;
+}
 
 int BFFEditor::execute_command(const ParsedCommand &cmd) {
   if (cmd.type == BUFFER_CMD) {
@@ -342,7 +530,7 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
         cerr << "Error: Could not open file " << cmd.buffer_arg << endl;
         return 1;
       }
-      cout << "File opened in buffe '" << cmd.buffer_name << "'" << endl;
+      cout << "File opened in buffer '" << cmd.buffer_name << "'" << endl;
       break;
     case APPEND:
       buffer_manager->append_to_buffer(cmd.buffer_name, cmd.buffer_arg);
@@ -350,14 +538,14 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
       break;
     case SAVE:
       if (!buffer_manager->save_file(cmd.buffer_name, cmd.buffer_arg)) {
-        cerr << "Error: Could not dave buffer " << cmd.buffer_name << endl;
+        cerr << "Error: Could not save buffer " << cmd.buffer_name << endl;
         return 1;
       }
       cout << "Buffer '" << cmd.buffer_name << "' saved" << endl;
       break;
     case NEW:
       if (!buffer_manager->create_new_buffer(cmd.buffer_name, cmd.buffer_arg)) {
-        cerr << "Error: Coulnd not create new buffer" << endl;
+        cerr << "Error: Could not create new buffer" << endl;
         return 1;
       }
       cout << "New buffer '" << cmd.buffer_name << "' created" << endl;
@@ -402,6 +590,15 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
         return 1;
       }
       cout << "Line " << cmd.line_number << " moved to position "
+           << cmd.second_line_number << endl;
+      break;
+    case COPY:
+      if (!buffer_manager->copy_line(cmd.buffer_name, cmd.line_number,
+                                     cmd.second_line_number)) {
+        cerr << "Error: Could not copy line" << endl;
+        return 1;
+      }
+      cout << "Line " << cmd.line_number << " copied to position "
            << cmd.second_line_number << endl;
       break;
     case GET:

@@ -1,0 +1,34 @@
+bff: bff-technical-preview02
+
+Usage: bff -b [BUFFER NAME] [BUFFER COMMAND|LINE COMMAND] [COMMAND ARGUMENT 1] [COMMAND ARGUMENT 2]
+
+Usage examples:
+	Buffer commands:
+		bff -b "test" open "/path/to/file.txt"
+		bff -b "test" print
+		bff -b "test" append "new content"
+		bff -b "test" save "/new/path/file.txt"
+		bff -b "test" new "/path/to/newfile.txt"
+	Line commands:
+		bff -b "test" line 10 replace "return 0;"
+		bff -b "test" line 5 insert "// New comment"
+		bff -b "test" line 3 delete
+		bff -b "test" line 7 move 2
+		bff -b "test" line 4 copy 8
+		bff -b "test" line 6 get
+		bff -b "test" line 2 print
+		bff -b "test" line 1 range 10
+
+Buidl commands:
+	make build
+		Builds the program and outputs it to "build" folder
+
+	make install
+		Builds the program and installs it to "$HOME/.local/bin/"
+
+	make ginstall
+		Builds the program and installs it to "$/usr/bin/"
+		Might need root permissions!
+
+	make help
+		Prints this message
