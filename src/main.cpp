@@ -362,7 +362,7 @@ void BufferManager::where_in_buffer(string buffer_name, string term) {
 
 void BufferManager::watch_buffer(string buffer_name) {
   Buffer *buf = get_buffer(buffer_name);
-  if (!buf) {
+  if (!buf || buf->file_path.empty()) {
     cerr << "Buffer '" << buffer_name
          << "' has no associated file to watch. Open a file first." << endl;
     return;
@@ -430,7 +430,7 @@ void BufferManager::watch_buffer(string buffer_name) {
       continue;
 
     inotify_rm_watch(inotify_fd, watch_fd);
-    int watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
+    watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
                                      IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
                                          IN_DELETE_SELF);
     if (watch_fd < 0) {
