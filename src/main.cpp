@@ -319,8 +319,8 @@ void BufferManager::print_buffer(string buffer_name) {
   }
 
   for (size_t i = 0; i < buf->lines.size(); i++)
-    cout << padder(4, buf->lines[i].length()) << i + 1 << ": " << buf->lines[i]
-         << endl;
+    cout << padder(4, to_string(i + 1).length()) << i + 1 << ": "
+         << buf->lines[i] << endl;
 }
 
 void BufferManager::append_to_buffer(string buffer_name, string content) {
@@ -342,7 +342,7 @@ void BufferManager::find_in_buffer(string buffer_name, string term) {
 
   for (size_t i = 0; i < buf->lines.size(); i++) {
     if (buf->lines[i].find(term) != string::npos)
-      cout << padder(4, to_string(i+1).length()) << i + 1 << ": "
+      cout << padder(4, to_string(i + 1).length()) << i + 1 << ": "
            << highlight_term(buf->lines[i], term) << endl;
   }
 }
@@ -540,7 +540,7 @@ void BufferManager::print_line(string buffer_name, int line_num) {
     return;
   }
 
-  cout << padder(4, buf->lines[line_num - 1].length()) << line_num << ": "
+  cout << padder(4, to_string(line_num).length()) << line_num << ": "
        << buf->lines[line_num - 1] << endl;
 }
 
@@ -558,7 +558,7 @@ void BufferManager::print_lines(string buffer_name, int start_line,
     end_line = static_cast<int>(buf->lines.size());
 
   for (int i = start_line; i <= end_line; ++i)
-    cout << padder(4, buf->lines[i].length()) << i << ": " << buf->lines[i - 1]
+    cout << padder(4, to_string(i).length()) << i << ": " << buf->lines[i - 1]
          << endl;
 }
 
