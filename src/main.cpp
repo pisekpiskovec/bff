@@ -722,7 +722,7 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
 }
 
 void CommandParser::print_usage() {
-  cout << "bff: bff-technical-preview02" << endl << endl;
+  cout << "bff: bff-technical-preview03" << endl << endl;
 
   cout << "Usage: bff -b [BUFFER NAME] [BUFFER COMMAND|LINE COMMAND] [COMMAND "
           "ARGUMENT 1] [COMMAND ARGUMENT 2]"
