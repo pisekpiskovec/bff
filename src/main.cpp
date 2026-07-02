@@ -1,11 +1,19 @@
+#include <cerrno>
+#include <csignal>
 #include <cstddef>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <ostream>
+#include <poll.h>
 #include <stdexcept>
 #include <string>
+#include <sys/inotify.h>
+#include <sys/poll.h>
+#include <unistd.h>
 #include <vector>
 
 using namespace std;
@@ -44,6 +52,7 @@ public:
   void append_to_buffer(string buffer_name, string content);
   void find_in_buffer(string buffer_name, string term);
   void where_in_buffer(string buffer_name, string term);
+  void watch_buffer(string buffer_name);
 
   // Line operations
   bool replace_line(string buffer_name, int line_num, string content);
@@ -140,6 +149,9 @@ string highlight_term(const string &line, const string &term) {
   return result;
 }
 
+volatile sig_atomic_t watch_should_stop = 0;
+void handle_watch_interrupt(int) { watch_should_stop = 1; }
+
 ///////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////
 
@@ -210,6 +222,13 @@ void BufferManager::save_buffer_to_temp(Buffer *buf) {
 
     temp_file.close();
   }
+
+  string meta_file_path = temp_directory + buf->name + ".path";
+  ofstream meta_file(meta_file_path);
+  if (meta_file.is_open()) {
+    meta_file << buf->file_path;
+    meta_file.close();
+  }
 }
 
 void BufferManager::load_buffer_from_temp(string name) {
@@ -227,6 +246,15 @@ void BufferManager::load_buffer_from_temp(string name) {
       buf->lines.push_back(line);
     }
     temp_file.close();
+  }
+
+  string meta_file_path = temp_directory + name + ".path";
+  if (filesystem::exists(meta_file_path)) {
+    ifstream meta_file(meta_file_path);
+    if (meta_file.is_open()) {
+      getline(meta_file, buf->file_path);
+      meta_file.close();
+    }
   }
 }
 
@@ -330,6 +358,99 @@ void BufferManager::where_in_buffer(string buffer_name, string term) {
     if (buf->lines[i].find(term) != string::npos)
       cout << i + 1 << endl;
   }
+}
+
+void BufferManager::watch_buffer(string buffer_name) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name
+         << "' has no associated file to watch. Open a file first." << endl;
+    return;
+  }
+
+  string file_path = buf->file_path;
+
+  int inotify_fd = inotify_init1(IN_NONBLOCK);
+  if (inotify_fd < 0) {
+    cerr << "Error: could not start file watcher (" << strerror(errno) << ")"
+         << endl;
+    return;
+  }
+
+  int watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
+                                   IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
+                                       IN_DELETE_SELF);
+  if (watch_fd < 0) {
+    cerr << "Error: could not watch '" << file_path << "' (" << strerror(errno)
+         << ")" << endl;
+    close(inotify_fd);
+    return;
+  }
+
+  cout << "Watching '" << file_path << "' for changes. Press Ctrl+C to stop."
+       << endl
+       << endl;
+  print_buffer(buffer_name);
+
+  watch_should_stop = 0;
+  signal(SIGINT, handle_watch_interrupt);
+
+  constexpr size_t event_size = sizeof(struct inotify_event);
+  char event_buf[4096] __attribute__((aligned(alignof(struct inotify_event))));
+
+  while (!watch_should_stop) {
+    struct pollfd pfd = {inotify_fd, POLLIN, 0};
+    int poll_result = poll(&pfd, 1, 500);
+
+    if (watch_should_stop)
+      break;
+    if (poll_result < 0) {
+      if (errno == EINTR)
+        continue;
+      break;
+    }
+    if (poll_result == 0)
+      continue;
+
+    ssize_t len = read(inotify_fd, event_buf, sizeof(event_buf));
+    if (len <= 0)
+      continue;
+
+    bool needs_reload = false;
+    for (char *ptr = event_buf; ptr < event_buf + len;) {
+      struct inotify_event *event =
+          reinterpret_cast<struct inotify_event *>(ptr);
+      if (event->mask &
+          (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF | IN_DELETE_SELF))
+        needs_reload = true;
+      ptr += event_size + event->len;
+    }
+
+    if (!needs_reload)
+      continue;
+
+    inotify_rm_watch(inotify_fd, watch_fd);
+    int watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
+                                     IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
+                                         IN_DELETE_SELF);
+    if (watch_fd < 0) {
+      cerr << "Watch lost on '" << file_path << "' (" << strerror(errno)
+           << "), stopping." << endl;
+      break;
+    }
+
+    if (open_file(buffer_name, file_path)) {
+      cout << endl;
+      print_buffer(buffer_name);
+    } else {
+      cerr << endl << "Error: could not reload '" << file_path << "'" << endl;
+    }
+  }
+
+  cout << endl << "Stopped watching '" << file_path << "'" << endl;
+  inotify_rm_watch(inotify_fd, watch_fd);
+  close(inotify_fd);
+  signal(SIGINT, SIG_DFL);
 }
 
 bool BufferManager::replace_line(string buffer_name, int line_num,
@@ -493,6 +614,10 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
       cmd.type = BUFFER_CMD;
       cmd.buffer_cmd = WHERE;
       cmd.buffer_arg = string(argv[4]);
+    } else if (command == "watch") {
+      cmd.type = BUFFER_CMD;
+      cmd.buffer_cmd = WATCH;
+      // cmd.buffer_arg = string(argv[4]);
     }
     // Checking if line command
     else if (command == "line" && argc > 5) {
@@ -615,6 +740,9 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
       break;
     case WHERE:
       buffer_manager->where_in_buffer(cmd.buffer_name, cmd.buffer_arg);
+      break;
+    case WATCH:
+      buffer_manager->watch_buffer(cmd.buffer_name);
       break;
     default:
     case PRINT:
