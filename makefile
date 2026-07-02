@@ -5,7 +5,7 @@ BUILD_DIR=build
 
 INSTALL_LOCAL_DIR=$(HOME)/.local/bin
 INSTALL_GLOBAL_DIR=/usr/local/bin
-MANUAL_LOCAL_DIR=$(HOME)~/.local/share/man
+MANUAL_LOCAL_DIR=$(HOME)/.local/share/man
 MANUAL_GLOBAL_DIR=/usr/share/man/man1
 
 build: always
