@@ -8,7 +8,6 @@
 #include <iostream>
 #include <map>
 #include <ostream>
-#include <poll.h>
 #include <stdexcept>
 #include <string>
 #include <sys/inotify.h>
@@ -52,6 +51,7 @@ public:
   void append_to_buffer(string buffer_name, string content);
   void find_in_buffer(string buffer_name, string term);
   void where_in_buffer(string buffer_name, string term);
+  int replace_in_buffer(string buffer_name, string term, string replacement);
   void watch_buffer(string buffer_name);
 
   // Line operations
@@ -67,7 +67,17 @@ public:
 
 enum CommandType { BUFFER_CMD, LINE_CMD };
 
-enum BufferCommand { OPEN, PRINT, APPEND, SAVE, NEW, FIND, WHERE, WATCH };
+enum BufferCommand {
+  OPEN,
+  PRINT,
+  APPEND,
+  SAVE,
+  NEW,
+  FIND,
+  WHERE,
+  WATCH,
+  FIND_REPLACE
+};
 
 enum LineCommand {
   REPLACE,
@@ -87,6 +97,7 @@ struct ParsedCommand {
   // For buffer commands
   BufferCommand buffer_cmd;
   string buffer_arg;
+  string replacement_arg;
 
   // For line commands
   LineCommand line_cmd;
@@ -360,6 +371,54 @@ void BufferManager::where_in_buffer(string buffer_name, string term) {
   }
 }
 
+int BufferManager::replace_in_buffer(string buffer_name, string term,
+                                     string replacement) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name << "' not found or empty." << endl;
+    return -1;
+  }
+  if (term.empty()) {
+    cerr << "Error: search term for replace cannot be empty." << endl;
+    return -1;
+  }
+
+  int total_replacement = 0;
+
+  for (size_t i = 0; i < buf->lines.size(); i++) {
+    string &line = buf->lines[i];
+    string rebuilt;
+    size_t pos = 0;
+    size_t match;
+    int line_replacements = 0;
+
+    while ((match = line.find(term, pos)) != string::npos) {
+      rebuilt += line.substr(pos, match - pos);
+      rebuilt += replacement;
+      pos = match + term.length();
+      line_replacements++;
+    }
+
+    if (line_replacements == 0)
+      continue;
+
+    rebuilt += line.substr(pos);
+    cout << padder(to_string(buf->lines.size()).length(),
+                   to_string(i + 1).length())
+         << i + 1 << ": " << highlight_term(rebuilt, replacement) << endl;
+
+    line = rebuilt;
+    total_replacement += line_replacements;
+  }
+
+  if (total_replacement > 0) {
+    buf->is_modified = true;
+    save_buffer_to_temp(buf);
+  }
+
+  return total_replacement;
+}
+
 void BufferManager::watch_buffer(string buffer_name) {
   Buffer *buf = get_buffer(buffer_name);
   if (!buf || buf->file_path.empty()) {
@@ -431,8 +490,8 @@ void BufferManager::watch_buffer(string buffer_name) {
 
     inotify_rm_watch(inotify_fd, watch_fd);
     watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
-                                     IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
-                                         IN_DELETE_SELF);
+                                 IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
+                                     IN_DELETE_SELF);
     if (watch_fd < 0) {
       cerr << "Watch lost on '" << file_path << "' (" << strerror(errno)
            << "), stopping." << endl;
@@ -608,8 +667,13 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
         cmd.buffer_arg = string(argv[4]);
     } else if (command == "find" && argc > 4) {
       cmd.type = BUFFER_CMD;
-      cmd.buffer_cmd = FIND;
       cmd.buffer_arg = string(argv[4]);
+      if (argc > 6 && string(argv[5]) == "replace") {
+        cmd.buffer_cmd = FIND_REPLACE;
+        cmd.replacement_arg = string(argv[6]);
+      } else {
+        cmd.buffer_cmd = FIND;
+      }
     } else if (command == "where" && argc > 4) {
       cmd.type = BUFFER_CMD;
       cmd.buffer_cmd = WHERE;
@@ -617,7 +681,6 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
     } else if (command == "watch") {
       cmd.type = BUFFER_CMD;
       cmd.buffer_cmd = WATCH;
-      // cmd.buffer_arg = string(argv[4]);
     }
     // Checking if line command
     else if (command == "line" && argc > 5) {
@@ -740,6 +803,10 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
       break;
     case WHERE:
       buffer_manager->where_in_buffer(cmd.buffer_name, cmd.buffer_arg);
+      break;
+    case FIND_REPLACE:
+      buffer_manager->replace_in_buffer(cmd.buffer_name, cmd.buffer_arg,
+                                        cmd.replacement_arg);
       break;
     case WATCH:
       buffer_manager->watch_buffer(cmd.buffer_name);
