@@ -42,6 +42,8 @@ public:
   bool create_new_buffer(string buffer_name, string file_path = "");
   void print_buffer(string buffer_name);
   void append_to_buffer(string buffer_name, string content);
+  void find_in_buffer(string buffer_name, string term);
+  void where_in_buffer(string buffer_name, string term);
 
   // Line operations
   bool replace_line(string buffer_name, int line_num, string content);
@@ -56,7 +58,7 @@ public:
 
 enum CommandType { BUFFER_CMD, LINE_CMD };
 
-enum BufferCommand { OPEN, PRINT, APPEND, SAVE, NEW };
+enum BufferCommand { OPEN, PRINT, APPEND, SAVE, NEW, FIND, WHERE, WATCH };
 
 enum LineCommand {
   REPLACE,
@@ -111,6 +113,29 @@ string padder(int total_length, size_t length_of_variable_to_pad_before,
 
   for (int i = 0; i < number_of_chars_to_pad; i++)
     result += char_to_represent_paddign;
+
+  return result;
+}
+
+string highlight_term(const string &line, const string &term) {
+  if (term.empty())
+    return line;
+
+  const string highlight_start = "\033[1;31m";
+  const string highlight_end = "\033[0m";
+
+  string result;
+  size_t pos = 0;
+  size_t match;
+
+  while ((match = line.find(term, pos)) != string::npos) {
+    result += line.substr(pos, match - pos);
+    result += highlight_start;
+    result += line.substr(match, term.length());
+    result += highlight_end;
+    pos = match + term.length();
+  }
+  result += line.substr(pos);
 
   return result;
 }
@@ -280,6 +305,33 @@ void BufferManager::append_to_buffer(string buffer_name, string content) {
   save_buffer_to_temp(buf);
 }
 
+void BufferManager::find_in_buffer(string buffer_name, string term) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name << "' not found or empty." << endl;
+    return;
+  }
+
+  for (size_t i = 0; i < buf->lines.size(); i++) {
+    if (buf->lines[i].find(term) != string::npos)
+      cout << padder(4, to_string(i+1).length()) << i + 1 << ": "
+           << highlight_term(buf->lines[i], term) << endl;
+  }
+}
+
+void BufferManager::where_in_buffer(string buffer_name, string term) {
+  Buffer *buf = get_buffer(buffer_name);
+  if (!buf) {
+    cerr << "Buffer '" << buffer_name << "' not found or empty." << endl;
+    return;
+  }
+
+  for (size_t i = 0; i < buf->lines.size(); i++) {
+    if (buf->lines[i].find(term) != string::npos)
+      cout << i + 1 << endl;
+  }
+}
+
 bool BufferManager::replace_line(string buffer_name, int line_num,
                                  string content) {
   Buffer *buf = get_buffer(buffer_name);
@@ -433,6 +485,14 @@ ParsedCommand CommandParser::parse(int argc, char **argv) {
       cmd.buffer_cmd = NEW;
       if (argc > 4)
         cmd.buffer_arg = string(argv[4]);
+    } else if (command == "find" && argc > 4) {
+      cmd.type = BUFFER_CMD;
+      cmd.buffer_cmd = FIND;
+      cmd.buffer_arg = string(argv[4]);
+    } else if (command == "where" && argc > 4) {
+      cmd.type = BUFFER_CMD;
+      cmd.buffer_cmd = WHERE;
+      cmd.buffer_arg = string(argv[4]);
     }
     // Checking if line command
     else if (command == "line" && argc > 5) {
@@ -549,6 +609,12 @@ int BFFEditor::execute_command(const ParsedCommand &cmd) {
         return 1;
       }
       cout << "New buffer '" << cmd.buffer_name << "' created" << endl;
+      break;
+    case FIND:
+      buffer_manager->find_in_buffer(cmd.buffer_name, cmd.buffer_arg);
+      break;
+    case WHERE:
+      buffer_manager->where_in_buffer(cmd.buffer_name, cmd.buffer_arg);
       break;
     default:
     case PRINT:
