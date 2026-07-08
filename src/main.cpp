@@ -436,9 +436,9 @@ void BufferManager::watch_buffer(string buffer_name) {
     return;
   }
 
-  int watch_fd = inotify_add_watch(inotify_fd, file_path.c_str(),
-                                   IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF |
-                                       IN_DELETE_SELF);
+  int watch_fd =
+      inotify_add_watch(inotify_fd, file_path.c_str(),
+                        IN_CLOSE_WRITE | IN_MOVE_SELF | IN_DELETE_SELF);
   if (watch_fd < 0) {
     cerr << "Error: could not watch '" << file_path << "' (" << strerror(errno)
          << ")" << endl;
@@ -479,8 +479,7 @@ void BufferManager::watch_buffer(string buffer_name) {
     for (char *ptr = event_buf; ptr < event_buf + len;) {
       struct inotify_event *event =
           reinterpret_cast<struct inotify_event *>(ptr);
-      if (event->mask &
-          (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVE_SELF | IN_DELETE_SELF))
+      if (event->mask & (IN_CLOSE_WRITE | IN_MOVE_SELF | IN_DELETE_SELF))
         needs_reload = true;
       ptr += event_size + event->len;
     }
