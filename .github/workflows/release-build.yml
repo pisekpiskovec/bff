@@ -1,0 +1,27 @@
+name: Build on release
+
+on:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-elf-x64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: sudo apt update && sudo apt install make -y build-essential gzip tar
+      - name: Build release binary
+        run: make build
+      - name: Strip binary
+        run: strip -s build/bff
+      - name: Package the binary
+        run: tar -czf bff-x64.tar.gz -C build bff makehelp
+      - name: Upload package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bff-x64.tar.gz
